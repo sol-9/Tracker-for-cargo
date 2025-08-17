@@ -1,8 +1,4 @@
-Here’s a clean **README.md** draft for your GitHub repo. It’s written so someone new can quickly understand the project and get it running:
-
----
-
-# 🚢 Oil & Cargo Ship Tracker — Hybrid AIS + Web
+🚢 Oil & Cargo Ship Tracker — Hybrid AIS + Web
 
 This project tracks **oil tankers and cargo ships worldwide** by combining:
 
@@ -103,6 +99,4 @@ This will:
 This project is for **research and educational purposes only**.
 Do not use it for navigation or safety-critical operations.
 
----
 
-👉 Do you want me to also write a **requirements.txt** with all necessary dependencies so the repo is truly drop-in runnable?
