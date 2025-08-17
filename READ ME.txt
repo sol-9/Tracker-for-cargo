@@ -1,0 +1,226 @@
+Awesome—here’s a **drop-in `README.md`** you can put at the root of your repo. It’s concise, complete, and tailored to everything we’ve set up so a fresh reviewer can understand + run the whole system fast.
+
+---
+
+# Oil & Cargo Ship Tracker — Hybrid AIS + Web Scraper
+
+**A real-time maritime intelligence platform** for tracking oil tankers and cargo ships.
+It fuses AIS live data, web discovery (IMO → MMSI), and local APIs into one dashboard with alerts.
+
+## Highlights
+
+* **AIS live streaming** (AISStream) into `tanker.db`
+* **Web discovery** of **IMO** numbers → map to **MMSI** via AIS static data
+* **Multi-source ingestion** (local API + scrapers) → unified DB
+* **Streamlit dashboard**: live map (PyDeck), trails, ship explorer
+* **Watchlist** with favorites + bulk import
+* **Alerting**: course change, speed drop, stop (market-relevant anomalies)
+* **One-click launcher** (`windows/run_all.ps1`) to start API, scrapers, ingesters, dashboard
+
+---
+
+## Architecture (10-second view)
+
+```
+[Web (Wikipedia etc.)] --discover IMOs--> data/discovered_imo.csv
+                                    |
+                                    v
+                            map_imo_to_mmsi.py
+                                    |
+                                    v
+  [AISStream static + positions] -> ships/positions tables
+                                    |
+[Local API] --locator--> positions  |
+                                    v
+                           tanker.db (SQLite)
+                                    |
+                                    v
+                       Streamlit dashboard (UI)
+```
+
+---
+
+## Repo layout
+
+```
+.
+├─ api/
+│  └─ main.py                 # FastAPI (local API)
+├─ scripts/
+│  ├─ discover_web_imo.py     # Scrape IMO numbers (Wikipedia etc.)
+│  ├─ map_imo_to_mmsi.py      # Join IMOs to MMSIs via AIS static data
+│  ├─ migrate_add_imo.py      # Adds watchlist.imo if missing
+│  ├─ locate_from_watchlist.py# Pull positions for watchlist MMSIs via local API
+│  ├─ ingest_stream_aisstream.py  # Live AIS stream ingester
+│  ├─ discover_mmsi.py            # (existing) generic MMSI discovery/merge
+│  ├─ scrape_vesselfinder.py      # (optional) community feed scraper
+│  ├─ scrape_position_api.py      # (optional) Node position-api bridge
+│  ├─ scrape_all.py               # (optional) orchestrator for scrapers
+│  └─ backfill_watchlist_class.py # (optional) classify Cargo/Tanker from ships
+├─ windows/
+│  └─ run_all.ps1              # One-click launcher (opens separate PS windows)
+├─ data/
+│  ├─ discovered_imo.csv       # Output of discover_web_imo.py
+│  └─ discovered_mmsi.csv      # Output of discover_mmsi.py (if used)
+├─ streamlit_app.py            # Dashboard UI (Map / Notifications / Explorer / Watchlist)
+├─ config.yaml                 # Scraper settings (polling, sources)
+├─ requirements.txt
+├─ .env.example                # Example secrets (copy to .env)
+└─ tanker.db                   # SQLite DB (created at runtime)
+```
+
+---
+
+## Quick start (Windows / PowerShell)
+
+### 0) One-time setup
+
+```powershell
+cd "C:\Users\<you>\OneDrive\Documents\oil_tanker_tracker_v6_hybrid_full"
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install --upgrade pip
+pip install -r requirements.txt
+python scripts\migrate_add_imo.py
+```
+
+Create `.env` (copy from `.env.example`) and set:
+
+```
+AISSTREAM_API_KEY=your_aisstream_key_here   # optional but recommended
+```
+
+### 1) One-click launch (recommended)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File windows\run_all.ps1
+```
+
+This opens separate windows for:
+
+* API (FastAPI)
+* IMO discovery (runs once)
+* IMO→MMSI mapper (runs once)
+* Locator loop (pulls positions via local API)
+* AISStream (live)
+* Dashboard (Streamlit)
+
+*NoAIS mode*:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File windows\run_all.ps1 -NoAIS
+```
+
+### 2) Manual (if you prefer discrete steps)
+
+```powershell
+# In each new PS window:
+cd "<project>"
+.\.venv\Scripts\Activate.ps1
+$env:PYTHONPATH = (Get-Location).Path
+
+# API
+uvicorn api.main:app --reload --host 0.0.0.0 --port 5050
+
+# Discover IMOs (once)
+python scripts\discover_web_imo.py
+
+# Map IMO→MMSI (once; relies on AIS static data in 'ships')
+python scripts\map_imo_to_mmsi.py
+
+# Locator (loop; pulls positions from local API for watchlist MMSIs)
+python scripts\locate_from_watchlist.py --base http://localhost:5050 --loop --interval 180
+
+# AISStream (optional live ingest; needs .env key)
+python scripts\ingest_stream_aisstream.py
+
+# Dashboard
+python -m streamlit run streamlit_app.py
+```
+
+---
+
+## Using the dashboard
+
+* **Tabs**:
+
+  * **Map**: live positions, trails, color by class; focus ring if selected from Alerts
+  * **Notifications**: course-change / speed-drop / stop; “Focus on Map” button recenters the map
+  * **Explorer**: latest positions + per-ship history
+  * **Watchlist**: add/update/delete MMSIs; bulk import; favorites
+* **Sidebar**: Time window, “Track only watchlist”, Vessel class filter, alert thresholds, search.
+
+---
+
+## Database schema (SQLite: `tanker.db`)
+
+* `ships(mmsi, imo, name, ship_type, …)` — enriched by AIS static data, scrapers
+* `positions(mmsi, ts, lat, lon, sog, cog, heading, draught, nav_status, source)`
+* `watchlist(mmsi PRIMARY KEY, name, class, favorite, imo)`
+* `alerts(id, ts, mmsi, kind, message)` — generated by UI logic
+
+---
+
+## Environment variables
+
+* `.env`
+
+  * `AISSTREAM_API_KEY` — key for AISStream
+* (optional) `OPENAI_API_KEY` — if you later enable AI-assisted classification in discovery scripts
+
+---
+
+## Typical run order for fresh data
+
+1. **Start AISStream** → begins filling `ships` (static) and `positions` (live).
+2. **discover\_web\_imo.py** → builds `data/discovered_imo.csv`.
+3. **map\_imo\_to\_mmsi.py** → upserts watchlist entries with MMSI (when AIS has seen the IMO).
+4. **locate\_from\_watchlist.py** → continuously fetches positions for watchlist MMSIs via local API.
+5. **streamlit\_app.py** → visualize; set **Track only watchlist** for focus.
+
+---
+
+## Troubleshooting
+
+* **Dashboard shows nothing**
+
+  * Run locator and/or AISStream; widen **Time window** to “Last 24h / All”; click **Refresh now**.
+* **Watchlist all NULL class**
+
+  * Let AIS static data accumulate, then run `backfill_watchlist_class.py`, or temporarily set class with `force_class_nulls.py`.
+* **AISStream “Api Key Is Not Valid”**
+
+  * Ensure `.env` exists in project root; no quotes/spaces around the key; restart.
+* **Too many ships**
+
+  * Turn on **Track only watchlist**, filter by **Vessel class**, or paste a curated bulk list.
+
+---
+
+## Notes on data sources & ToS
+
+* Web discovery defaults to **Wikipedia/Wikidata** (public, safe).
+* If you extend scrapers to commercial trackers, review and respect each site’s **Terms of Service** and add polite delays.
+* For heavy JS sites, consider headless browsers (e.g., Playwright) and cache results to avoid repeated hits.
+
+---
+
+## What to include when you share/upload for review
+
+* **This `README.md`**
+* `scripts/` (all Python launchable scripts)
+* `streamlit_app.py`
+* `api/` with `main.py`
+* `windows/run_all.ps1`
+* `requirements.txt`, `.env.example`, `config.yaml`
+* (optional) `data/discovered_imo.csv` sample (no secrets)
+
+To create a review zip (PowerShell):
+
+```powershell
+Compress-Archive -Path * -DestinationPath ..\oil_tanker_tracker_package.zip -Force
+```
+
+---
+
+If you want, I can also produce a **shorter “pitch” README** (2-paragraph version) for non-technical stakeholders.

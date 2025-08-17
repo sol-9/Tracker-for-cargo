@@ -1,0 +1,16 @@
+# v6 hybrid config
+providers:
+  - local_api
+
+local_api:
+  base_url: "http://localhost:5050"
+  path_template: "/location/{mmsi}"
+  poll_seconds: 60
+
+scrapers:
+  vesselfinder: true
+  us_marinecadastre: false
+
+watchlist:
+  - 636014123
+  - 538005656

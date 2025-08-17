@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+requests
+beautifulsoup4
+lxml
+pandas
+pyyaml
+streamlit
+websocket-client
+python-dotenv
+pydeck
